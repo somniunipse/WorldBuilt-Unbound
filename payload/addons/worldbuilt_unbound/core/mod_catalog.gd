@@ -11,9 +11,21 @@ const REQUIRED_FIELDS := [
 	"entrypoint"
 ]
 
+const INVALID_ID_CHARACTERS := [
+	"/",
+	"\\",
+	":",
+	" ",
+	"\t",
+	"\n",
+	"\r"
+]
+
 
 func scan_directory(mods_directory: String) -> Array[Dictionary]:
 	var installed_mods: Array[Dictionary] = []
+	var seen_ids := {}
+
 	var directory := DirAccess.open(mods_directory)
 
 	if directory == null:
@@ -35,41 +47,66 @@ func scan_directory(mods_directory: String) -> Array[Dictionary]:
 				file_name
 			)
 
-			var manifest := _read_manifest(archive_path)
+			var manifest := _read_manifest(
+				archive_path
+			)
 
 			if not manifest.is_empty():
-				manifest["archive_name"] = file_name
-				manifest["archive_path"] = archive_path
-
-				installed_mods.append(manifest)
-
-				print(
-					"[Unbound] Valid mod: %s %s"
-					% [
-						manifest["name"],
-						manifest["version"]
-					]
+				var mod_id := str(
+					manifest["id"]
 				)
+
+				var normalized_id := mod_id.to_lower()
+
+				if seen_ids.has(normalized_id):
+					push_warning(
+						"[Unbound] Duplicate mod ID '%s' in %s. Skipping it."
+						% [
+							mod_id,
+							file_name
+						]
+					)
+				else:
+					seen_ids[normalized_id] = true
+
+					manifest["archive_name"] = file_name
+					manifest["archive_path"] = archive_path
+
+					installed_mods.append(manifest)
+
+					print(
+						"[Unbound] Valid mod: %s %s"
+						% [
+							manifest["name"],
+							manifest["version"]
+						]
+					)
 
 		file_name = directory.get_next()
 
 	directory.list_dir_end()
 
-	installed_mods.sort_custom(_sort_by_name)
+	installed_mods.sort_custom(
+		_sort_by_name
+	)
 
 	return installed_mods
 
 
-func _read_manifest(archive_path: String) -> Dictionary:
+func _read_manifest(
+	archive_path: String
+) -> Dictionary:
 	var zip_reader := ZIPReader.new()
-	var open_error := zip_reader.open(archive_path)
+	var open_error := zip_reader.open(
+		archive_path
+	)
 
 	if open_error != OK:
 		push_warning(
-			"[Unbound] Could not open %s. Error: %d"
+			"[Unbound] Could not open %s: %s"
 			% [
 				archive_path.get_file(),
-				open_error
+				error_string(open_error)
 			]
 		)
 		return {}
@@ -99,9 +136,14 @@ func _read_manifest(archive_path: String) -> Dictionary:
 		)
 		return {}
 
-	var manifest_text := manifest_bytes.get_string_from_utf8()
+	var manifest_text := (
+		manifest_bytes.get_string_from_utf8()
+	)
+
 	var json := JSON.new()
-	var parse_error := json.parse(manifest_text)
+	var parse_error := json.parse(
+		manifest_text
+	)
 
 	if parse_error != OK:
 		push_warning(
@@ -123,7 +165,10 @@ func _read_manifest(archive_path: String) -> Dictionary:
 
 	var manifest: Dictionary = json.data
 
-	if not _validate_manifest(manifest, archive_path):
+	if not _validate_manifest(
+		manifest,
+		archive_path
+	):
 		return {}
 
 	return manifest
@@ -134,7 +179,9 @@ func _validate_manifest(
 	archive_path: String
 ) -> bool:
 	for field_name in REQUIRED_FIELDS:
-		var field_value: Variant = manifest.get(field_name)
+		var field_value: Variant = manifest.get(
+			field_name
+		)
 
 		if (
 			typeof(field_value) != TYPE_STRING
@@ -147,6 +194,61 @@ func _validate_manifest(
 					field_name
 				]
 			)
+			return false
+
+	var mod_id := str(
+		manifest["id"]
+	).strip_edges()
+
+	var entrypoint := str(
+		manifest["entrypoint"]
+	).strip_edges()
+
+	if not _is_valid_mod_id(mod_id):
+		push_warning(
+			"[Unbound] %s has an unsafe mod ID: %s"
+			% [
+				archive_path.get_file(),
+				mod_id
+			]
+		)
+		return false
+
+	var required_prefix := (
+		"res://mods/%s/" % mod_id
+	)
+
+	if (
+		not entrypoint.begins_with(required_prefix)
+		or not entrypoint.ends_with(".gd")
+		or entrypoint.contains("..")
+		or entrypoint.contains("\\")
+	):
+		push_warning(
+			"[Unbound] %s has an unsafe entrypoint: %s"
+			% [
+				archive_path.get_file(),
+				entrypoint
+			]
+		)
+		return false
+
+	manifest["id"] = mod_id
+	manifest["entrypoint"] = entrypoint
+
+	return true
+
+
+func _is_valid_mod_id(mod_id: String) -> bool:
+	if (
+		mod_id.begins_with(".")
+		or mod_id.ends_with(".")
+		or mod_id.contains("..")
+	):
+		return false
+
+	for invalid_character in INVALID_ID_CHARACTERS:
+		if mod_id.contains(invalid_character):
 			return false
 
 	return true
