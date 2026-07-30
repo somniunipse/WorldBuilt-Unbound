@@ -2,8 +2,13 @@ extends Node2D
 
 const MODS_FOLDER_NAME := "mods"
 const MAX_VISIBLE_MODS := 3
+
 const MOD_CATALOG_SCRIPT := preload(
 	"res://addons/worldbuilt_unbound/core/mod_catalog.gd"
+)
+
+const MOD_SETTINGS_SCRIPT := preload(
+	"res://addons/worldbuilt_unbound/core/mod_settings.gd"
 )
 
 const TITLE_POSITION := Vector2(35.0, 92.0)
@@ -17,7 +22,7 @@ const LABEL_HEIGHT := 20.0
 var _main_menu_buttons: Array[Button] = []
 var _button_template: Button
 var _mod_catalog := MOD_CATALOG_SCRIPT.new()
-
+var _mod_settings := MOD_SETTINGS_SCRIPT.new()
 
 func setup(
 	start_button: Button,
@@ -150,6 +155,13 @@ func _refresh_mod_list() -> void:
 		_get_mods_directory()
 	)
 
+	for manifest in installed_mods:
+		var mod_id := str(manifest["id"])
+
+		manifest["enabled"] = _mod_settings.is_enabled(
+			mod_id
+		)
+
 	if installed_mods.is_empty():
 		mod_list_label.text = "NO VALID MODS"
 		return
@@ -174,7 +186,14 @@ func _format_mod_list(
 		if not output.is_empty():
 			output += "\n"
 
-		output += "%s V%s" % [
+		var state_marker := (
+			"[X]"
+			if bool(manifest["enabled"])
+			else "[ ]"
+		)
+
+		output += "%s %s V%s" % [
+			state_marker,
 			str(manifest["name"]).to_upper(),
 			str(manifest["version"])
 		]
