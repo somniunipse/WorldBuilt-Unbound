@@ -12,17 +12,28 @@ const MOD_SETTINGS_SCRIPT := preload(
 )
 
 const TITLE_POSITION := Vector2(35.0, 92.0)
-const MESSAGE_POSITION := Vector2(35.0, 118.0)
-const OPEN_FOLDER_POSITION := Vector2(35.0, 141.0)
-const BACK_POSITION := Vector2(35.0, 168.0)
+const EMPTY_MESSAGE_POSITION := Vector2(35.0, 118.0)
+const MOD_ROW_START_POSITION := Vector2(35.0, 116.0)
+const RESTART_MESSAGE_POSITION := Vector2(35.0, 148.0)
+const OPEN_FOLDER_POSITION := Vector2(35.0, 160.0)
+const BACK_POSITION := Vector2(35.0, 187.0)
 
-const LABEL_WIDTH := 134.0
+const MOD_ROW_SIZE := Vector2(220.0, 10.0)
+const MOD_ROW_SPACING := 10.0
+
+const LABEL_WIDTH := 220.0
 const LABEL_HEIGHT := 20.0
 
 var _main_menu_buttons: Array[Button] = []
+var _mod_row_buttons: Array[Button] = []
+
 var _button_template: Button
 var _mod_catalog := MOD_CATALOG_SCRIPT.new()
 var _mod_settings := MOD_SETTINGS_SCRIPT.new()
+
+var _installed_mods: Array[Dictionary] = []
+var _restart_required := false
+
 
 func setup(
 	start_button: Button,
@@ -30,6 +41,7 @@ func setup(
 	mods_button: Button
 ) -> void:
 	_button_template = start_button
+
 	_main_menu_buttons = [
 		start_button,
 		delete_button,
@@ -46,12 +58,22 @@ func setup(
 	_add_label(
 		"EmptyMessage",
 		"NO MODS INSTALLED",
-		MESSAGE_POSITION,
+		EMPTY_MESSAGE_POSITION,
 		5
 	)
 
-	var mod_list_label := get_node("EmptyMessage") as Label
-	mod_list_label.size = Vector2(220.0, 28.0)
+	_add_label(
+		"RestartMessage",
+		"RESTART REQUIRED",
+		RESTART_MESSAGE_POSITION,
+		5
+	)
+
+	var restart_message := get_node(
+		"RestartMessage"
+	) as Label
+
+	restart_message.hide()
 
 	_add_button(
 		"OpenFolderButton",
@@ -97,7 +119,11 @@ func _add_label(
 	label.name = node_name
 	label.text = label_text
 	label.position = label_position
-	label.size = Vector2(LABEL_WIDTH, LABEL_HEIGHT)
+	label.size = Vector2(
+		LABEL_WIDTH,
+		LABEL_HEIGHT
+	)
+
 	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 
 	label.add_theme_font_override(
@@ -118,7 +144,7 @@ func _add_button(
 	button_text: String,
 	button_position: Vector2,
 	callback: Callable
-) -> void:
+) -> Button:
 	var button := _button_template.duplicate(0) as Button
 
 	if button == null:
@@ -126,7 +152,7 @@ func _add_button(
 			"[Unbound] Could not create button: %s"
 			% node_name
 		)
-		return
+		return null
 
 	button.name = node_name
 	button.text = button_text
@@ -135,78 +161,174 @@ func _add_button(
 
 	add_child(button)
 
+	return button
+
 
 func _refresh_mod_list() -> void:
-	var mod_list_label := get_node_or_null(
+	_clear_mod_rows()
+
+	var empty_message := get_node_or_null(
 		"EmptyMessage"
 	) as Label
 
-	if mod_list_label == null:
+	if empty_message == null:
 		push_warning(
-			"[Unbound] Could not find the mod list label."
+			"[Unbound] Could not find EmptyMessage."
 		)
 		return
 
 	if not _ensure_mods_directory():
-		mod_list_label.text = "MOD FOLDER ERROR"
+		empty_message.text = "MOD FOLDER ERROR"
+		empty_message.show()
 		return
 
-	var installed_mods := _mod_catalog.scan_directory(
+	_installed_mods = _mod_catalog.scan_directory(
 		_get_mods_directory()
 	)
 
-	for manifest in installed_mods:
+	for manifest in _installed_mods:
 		var mod_id := str(manifest["id"])
 
 		manifest["enabled"] = _mod_settings.is_enabled(
 			mod_id
 		)
 
-	if installed_mods.is_empty():
-		mod_list_label.text = "NO VALID MODS"
+	if _installed_mods.is_empty():
+		empty_message.text = "NO VALID MODS"
+		empty_message.show()
 		return
 
-	mod_list_label.text = _format_mod_list(
-		installed_mods
-	)
+	empty_message.hide()
 
-
-func _format_mod_list(
-	installed_mods: Array[Dictionary]
-) -> String:
-	var output := ""
 	var visible_count := mini(
-		installed_mods.size(),
+		_installed_mods.size(),
 		MAX_VISIBLE_MODS
 	)
 
 	for index in range(visible_count):
-		var manifest := installed_mods[index]
-
-		if not output.is_empty():
-			output += "\n"
-
-		var state_marker := (
-			"[X]"
-			if bool(manifest["enabled"])
-			else "[ ]"
+		_add_mod_row(
+			index,
+			_installed_mods[index]
 		)
 
-		output += "%s %s V%s" % [
-			state_marker,
-			str(manifest["name"]).to_upper(),
-			str(manifest["version"])
-		]
 
-	var hidden_count := (
-		installed_mods.size()
-		- visible_count
+func _add_mod_row(
+	index: int,
+	manifest: Dictionary
+) -> void:
+	var mod_id := str(manifest["id"])
+
+	var row_position := (
+		MOD_ROW_START_POSITION
+		+ Vector2(
+			0.0,
+			MOD_ROW_SPACING * index
+		)
 	)
 
-	if hidden_count > 0:
-		output += "\n+%d MORE" % hidden_count
+	var row_button := _button_template.duplicate(0) as Button
 
-	return output
+	if row_button == null:
+		push_error(
+			"[Unbound] Could not create a row for %s."
+			% mod_id
+		)
+		return
+
+	row_button.show()
+
+	row_button.name = "ModRow%d" % index
+	row_button.position = row_position
+	row_button.size = MOD_ROW_SIZE
+	row_button.alignment = HORIZONTAL_ALIGNMENT_LEFT
+	row_button.clip_text = true
+	row_button.mouse_default_cursor_shape = (
+		Control.CURSOR_POINTING_HAND
+	)
+
+	_hide_button_frame(row_button)
+	_update_mod_row_text(row_button, manifest)
+
+	row_button.pressed.connect(
+		_toggle_mod.bind(mod_id)
+	)
+
+	add_child(row_button)
+	_mod_row_buttons.append(row_button)
+
+
+func _hide_button_frame(button: Button) -> void:
+	var frame := button.get_node_or_null(
+		"NinePatchRect"
+	) as CanvasItem
+
+	if frame != null:
+		frame.hide()
+
+
+func _update_mod_row_text(
+	button: Button,
+	manifest: Dictionary
+) -> void:
+	var state_marker := (
+		"[X]"
+		if bool(manifest["enabled"])
+		else "[ ]"
+	)
+
+	button.text = "%s %s V%s" % [
+		state_marker,
+		str(manifest["name"]).to_upper(),
+		str(manifest["version"])
+	]
+
+
+func _toggle_mod(mod_id: String) -> void:
+	var manifest := _find_mod(mod_id)
+
+	if manifest.is_empty():
+		push_warning(
+			"[Unbound] Could not find mod: %s"
+			% mod_id
+		)
+		return
+
+	var new_state := not bool(
+		manifest["enabled"]
+	)
+
+	if not _mod_settings.set_enabled(
+		mod_id,
+		new_state
+	):
+		return
+
+	manifest["enabled"] = new_state
+	_restart_required = true
+
+	var restart_message := get_node_or_null(
+		"RestartMessage"
+	) as Label
+
+	if restart_message != null:
+		restart_message.show()
+
+	_refresh_mod_list()
+
+
+func _find_mod(mod_id: String) -> Dictionary:
+	for manifest in _installed_mods:
+		if str(manifest["id"]) == mod_id:
+			return manifest
+
+	return {}
+
+
+func _clear_mod_rows() -> void:
+	for button in _mod_row_buttons:
+		button.queue_free()
+
+	_mod_row_buttons.clear()
 
 
 func _get_mods_directory() -> String:
@@ -228,7 +350,8 @@ func _ensure_mods_directory() -> bool:
 		return true
 
 	push_error(
-		"[Unbound] Could not create the mods folder."
+		"[Unbound] Could not create the mods folder: %s"
+		% error_string(create_error)
 	)
 
 	return false
@@ -244,5 +367,6 @@ func _open_mods_folder() -> void:
 
 	if open_error != OK:
 		push_error(
-			"[Unbound] Could not open the mods folder."
+			"[Unbound] Could not open the mods folder: %s"
+			% error_string(open_error)
 		)
