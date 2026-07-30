@@ -1,8 +1,10 @@
 extends Node2D
 
 const MODS_FOLDER_NAME := "mods"
-const MOD_ARCHIVE_EXTENSION := "zip"
 const MAX_VISIBLE_MODS := 3
+const MOD_CATALOG_SCRIPT := preload(
+	"res://addons/worldbuilt_unbound/core/mod_catalog.gd"
+)
 
 const TITLE_POSITION := Vector2(35.0, 92.0)
 const MESSAGE_POSITION := Vector2(35.0, 118.0)
@@ -14,6 +16,7 @@ const LABEL_HEIGHT := 20.0
 
 var _main_menu_buttons: Array[Button] = []
 var _button_template: Button
+var _mod_catalog := MOD_CATALOG_SCRIPT.new()
 
 
 func setup(
@@ -128,28 +131,6 @@ func _add_button(
 	add_child(button)
 
 
-func _open_mods_folder() -> void:
-	var game_directory := OS.get_executable_path().get_base_dir()
-	var mods_directory := game_directory.path_join(
-		MODS_FOLDER_NAME
-	)
-
-	var create_error := DirAccess.make_dir_recursive_absolute(
-		mods_directory
-	)
-
-	if create_error != OK:
-		push_error(
-			"[Unbound] Could not create the mods folder."
-		)
-		return
-
-	var open_error := OS.shell_open(mods_directory)
-
-	if open_error != OK:
-		push_error(
-			"[Unbound] Could not open the mods folder."
-		)
 func _refresh_mod_list() -> void:
 	var mod_list_label := get_node_or_null(
 		"EmptyMessage"
@@ -161,74 +142,47 @@ func _refresh_mod_list() -> void:
 		)
 		return
 
-	var mod_files := _find_mod_archives()
-
-	if mod_files.is_empty():
-		mod_list_label.text = "NO MODS INSTALLED"
+	if not _ensure_mods_directory():
+		mod_list_label.text = "MOD FOLDER ERROR"
 		return
 
-	mod_list_label.text = _format_mod_list(mod_files)
-
-
-func _find_mod_archives() -> Array[String]:
-	var mod_files: Array[String] = []
-
-	var mods_directory := _get_mods_directory()
-
-	var create_error := DirAccess.make_dir_recursive_absolute(
-		mods_directory
+	var installed_mods := _mod_catalog.scan_directory(
+		_get_mods_directory()
 	)
 
-	if create_error != OK:
-		push_error(
-			"[Unbound] Could not create the mods folder."
-		)
-		return mod_files
+	if installed_mods.is_empty():
+		mod_list_label.text = "NO VALID MODS"
+		return
 
-	var directory := DirAccess.open(mods_directory)
-
-	if directory == null:
-		push_error(
-			"[Unbound] Could not read the mods folder."
-		)
-		return mod_files
-
-	directory.list_dir_begin()
-
-	var file_name := directory.get_next()
-
-	while not file_name.is_empty():
-		if not directory.current_is_dir():
-			var extension := file_name.get_extension().to_lower()
-
-			if extension == MOD_ARCHIVE_EXTENSION:
-				mod_files.append(file_name)
-
-		file_name = directory.get_next()
-
-	directory.list_dir_end()
-
-	mod_files.sort()
-
-	print("[Unbound] Found ZIP files: ", mod_files)
-
-	return mod_files
+	mod_list_label.text = _format_mod_list(
+		installed_mods
+	)
 
 
-func _format_mod_list(mod_files: Array[String]) -> String:
+func _format_mod_list(
+	installed_mods: Array[Dictionary]
+) -> String:
 	var output := ""
 	var visible_count := mini(
-		mod_files.size(),
+		installed_mods.size(),
 		MAX_VISIBLE_MODS
 	)
 
 	for index in range(visible_count):
+		var manifest := installed_mods[index]
+
 		if not output.is_empty():
 			output += "\n"
 
-		output += mod_files[index].get_basename().to_upper()
+		output += "%s V%s" % [
+			str(manifest["name"]).to_upper(),
+			str(manifest["version"])
+		]
 
-	var hidden_count := mod_files.size() - visible_count
+	var hidden_count := (
+		installed_mods.size()
+		- visible_count
+	)
 
 	if hidden_count > 0:
 		output += "\n+%d MORE" % hidden_count
@@ -237,8 +191,39 @@ func _format_mod_list(mod_files: Array[String]) -> String:
 
 
 func _get_mods_directory() -> String:
-	var game_directory := OS.get_executable_path().get_base_dir()
+	var game_directory := (
+		OS.get_executable_path().get_base_dir()
+	)
 
 	return game_directory.path_join(
 		MODS_FOLDER_NAME
 	)
+
+
+func _ensure_mods_directory() -> bool:
+	var create_error := DirAccess.make_dir_recursive_absolute(
+		_get_mods_directory()
+	)
+
+	if create_error == OK:
+		return true
+
+	push_error(
+		"[Unbound] Could not create the mods folder."
+	)
+
+	return false
+
+
+func _open_mods_folder() -> void:
+	if not _ensure_mods_directory():
+		return
+
+	var open_error := OS.shell_open(
+		_get_mods_directory()
+	)
+
+	if open_error != OK:
+		push_error(
+			"[Unbound] Could not open the mods folder."
+		)
