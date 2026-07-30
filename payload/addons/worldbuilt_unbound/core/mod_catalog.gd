@@ -7,7 +7,8 @@ const REQUIRED_FIELDS := [
 	"name",
 	"version",
 	"author",
-	"game_version"
+	"game_version",
+	"entrypoint"
 ]
 
 

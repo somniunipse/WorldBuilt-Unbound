@@ -8,12 +8,19 @@ const MOD_MENU_SCRIPT_PATH := (
 	"res://addons/worldbuilt_unbound/ui/mod_menu.gd"
 )
 
+const MOD_RUNTIME_SCRIPT := preload(
+	"res://addons/worldbuilt_unbound/core/mod_runtime.gd"
+)
+
 const START_BUTTON_PATH := NodePath("StartButton")
 const DELETE_BUTTON_PATH := NodePath("DeleteSave")
 const MODS_BUTTON_PATH := NodePath("ModsButton")
-
 const MODS_BUTTON_OFFSET := Vector2(0.0, 54.0)
 
+var _mod_runtime := MOD_RUNTIME_SCRIPT.new()
+
+func _init() -> void:
+	_mod_runtime.load_enabled_mods(self)
 
 func _ready() -> void:
 	print(
